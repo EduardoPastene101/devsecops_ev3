@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -6,6 +7,8 @@ pipeline {
         PROD_HOST = '10.0.1.130'
         PROD_PATH = '/opt/securedev'
         ZAP_REPORTS = '/home/ubuntu/zap/reports'
+        TEST_CONTAINER = 'securedev-ci'
+        TEST_PORT = '18000'
     }
 
     stages {
@@ -19,7 +22,6 @@ pipeline {
 
         stage('2 - Build') {
             steps {
-                echo 'Construyendo imagen Docker'
                 sh '''
                     docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} .
                     docker image ls ${IMAGE_NAME}
@@ -27,50 +29,73 @@ pipeline {
             }
         }
 
-        stage('3 - Tests') {
-            steps {
-                sh '''
-                    docker rm -f securedev-ci 2>/dev/null || true
+        
+		stage('3 - Tests') {
+			steps {
+				sh '''
+					docker rm -f ${TEST_CONTAINER} 2>/dev/null || true
 
-                    docker run -d \
-                      --name securedev-ci \
-                      -p 18000:8000 \
-                      ${IMAGE_NAME}:${BUILD_NUMBER}
+					docker run -d \
+					  --name ${TEST_CONTAINER} \
+					  -p ${TEST_PORT}:8000 \
+					  ${IMAGE_NAME}:${BUILD_NUMBER}
 
-                    for i in $(seq 1 20); do
-                      if curl -fsS http://127.0.0.1:18000/health; then
-                        echo "Prueba de salud aprobada"
-                        exit 0
-                      fi
-                      sleep 3
-                    done
+					READY=0
 
-                    echo "La aplicacion no respondio correctamente"
-                    docker logs securedev-ci
-                    exit 1
-                '''
-            }
-            post {
-                always {
-                    sh 'docker rm -f securedev-ci 2>/dev/null || true'
-                }
-            }
-        }
+					for i in $(seq 1 20); do
+					  if curl -fsS http://127.0.0.1:${TEST_PORT}/health; then
+						READY=1
+						break
+					  fi
+					  sleep 3
+					done
+
+					if [ "$READY" -ne 1 ]; then
+					  echo "ERROR: /health no responde"
+					  docker logs ${TEST_CONTAINER}
+					  exit 1
+					fi
+
+					echo "Verificando endpoint /metrics"
+					curl -fsS http://127.0.0.1:${TEST_PORT}/metrics | grep -q "securedev_http_requests_total"
+
+					echo "Verificando pagina principal"
+					curl -fsS http://127.0.0.1:${TEST_PORT}/ | grep -qi "login"
+
+					echo "Todas las pruebas funcionales finalizaron correctamente"
+				'''
+			}
+		}
+
 
         stage('4 - OWASP ZAP') {
             steps {
                 sh '''
                     mkdir -p ${ZAP_REPORTS}
 
-                    docker run --rm \
+                    docker rm -f zap-scan 2>/dev/null || true
+
+                    docker run \
+                      --name zap-scan \
                       --network host \
                       -v ${ZAP_REPORTS}:/zap/wrk/:rw \
                       ghcr.io/zaproxy/zaproxy:stable \
                       zap-baseline.py \
-                      -t http://127.0.0.1:18000 \
+                      -t http://127.0.0.1:${TEST_PORT} \
                       -r reporte-zap-${BUILD_NUMBER}.html \
                       -I
+
+                    docker cp zap-scan:/zap/wrk/reporte-zap-${BUILD_NUMBER}.html \
+                      ${WORKSPACE}/reporte-zap-${BUILD_NUMBER}.html
+
+                    docker rm zap-scan
                 '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reporte-zap-*.html',
+                                     allowEmptyArchive: true
+                }
             }
         }
 
@@ -89,7 +114,13 @@ pipeline {
 
                         rsync -avz --delete \
                           --exclude='.git' \
+                          --exclude='.env' \
+                          --exclude='*.db' \
+                          --exclude='*.sqlite' \
+                          --exclude='*.sqlite3' \
                           --exclude='__pycache__' \
+                          --exclude='.venv' \
+                          --exclude='reporte-zap-*.html' \
                           -e "ssh -i ${SSH_KEY} -o StrictHostKeyChecking=yes" \
                           ./ ${SSH_USER}@${PROD_HOST}:${PROD_PATH}/
 
@@ -123,14 +154,20 @@ pipeline {
     }
 
     post {
+        always {
+            sh '''
+                docker rm -f ${TEST_CONTAINER} 2>/dev/null || true
+                docker rm -f zap-scan 2>/dev/null || true
+            '''
+            echo 'Ejecucion del pipeline finalizada'
+        }
+
         success {
             echo 'CI/CD FINALIZADO CORRECTAMENTE'
         }
+
         failure {
             echo 'CI/CD FALLIDO. Revisar la etapa con error.'
-        }
-        always {
-            echo 'Ejecucion del pipeline finalizada'
         }
     }
 }
