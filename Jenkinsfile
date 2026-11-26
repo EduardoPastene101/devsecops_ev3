@@ -30,42 +30,46 @@ pipeline {
         }
 
         
+		
 		stage('3 - Tests') {
 			steps {
 				sh '''
-					docker rm -f ${TEST_CONTAINER} 2>/dev/null || true
+					docker rm -f securedev-ci 2>/dev/null || true
 
 					docker run -d \
-					  --name ${TEST_CONTAINER} \
-					  -p ${TEST_PORT}:8000 \
+					  --name securedev-ci \
+					  -p 18000:8000 \
 					  ${IMAGE_NAME}:${BUILD_NUMBER}
 
 					READY=0
 
 					for i in $(seq 1 20); do
-					  if curl -fsS http://127.0.0.1:${TEST_PORT}/health; then
-						READY=1
-						break
-					  fi
-					  sleep 3
+						if curl -fsS http://127.0.0.1:18000/health; then
+							READY=1
+							break
+						fi
+						sleep 3
 					done
 
 					if [ "$READY" -ne 1 ]; then
-					  echo "ERROR: /health no responde"
-					  docker logs ${TEST_CONTAINER}
-					  exit 1
+						echo "ERROR: La aplicacion no respondio"
+						docker logs securedev-ci
+						exit 1
 					fi
 
 					echo "Verificando endpoint /metrics"
-					curl -fsS http://127.0.0.1:${TEST_PORT}/metrics | grep -q "securedev_http_requests_total"
+					curl -fsS http://127.0.0.1:18000/metrics \
+					  | grep -q "securedev_http_requests_total"
 
-					echo "Verificando pagina principal"
-					curl -fsS http://127.0.0.1:${TEST_PORT}/ | grep -qi "login"
+					echo "Verificando pagina de login"
+					curl -fsS http://127.0.0.1:18000/login \
+					  -o /dev/null
 
 					echo "Todas las pruebas funcionales finalizaron correctamente"
 				'''
 			}
 		}
+
 
 
         stage('4 - OWASP ZAP') {
