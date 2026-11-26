@@ -38,6 +38,8 @@ def create_app(database_path=None):
         database_path or os.getenv("DATABASE_PATH", str(Path(__file__).with_name("securedev.db")))
     )
 
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     def db():
         if "db" not in g:
             g.db = sqlite3.connect(app.config["DATABASE_PATH"])
@@ -54,13 +56,31 @@ def create_app(database_path=None):
     def start_request_timer():
         g.request_started_at = time.perf_counter()
 
+    
     @app.after_request
-    def record_request(response):
-        if request.endpoint != "metrics":
-            endpoint = request.endpoint or "unknown"
-            HTTP_REQUESTS.labels(endpoint, request.method, str(response.status_code)).inc()
-            HTTP_DURATION.labels(endpoint).observe(time.perf_counter() - g.request_started_at)
+    def add_security_headers(response):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "object-src 'none'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
+
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=()"
+        )
+
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+
         return response
+
 
     with app.app_context():
         Path(app.config["DATABASE_PATH"]).parent.mkdir(parents=True, exist_ok=True)
