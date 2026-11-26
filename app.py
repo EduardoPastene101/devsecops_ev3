@@ -8,7 +8,7 @@ import os
 import sqlite3
 import time
 from pathlib import Path
-
+from flask_wtf.csrf import CSRFProtect
 from flask import Flask, abort, g, redirect, render_template, request, session, url_for
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -33,6 +33,7 @@ LOGIN_FAILURES = Counter(
 def create_app(database_path=None):
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "clave-insegura-solo-laboratorio")
+    csrf = CSRFProtect(app) #Modificado por Eduardo Pastene
     app.config["DATABASE_PATH"] = str(
         database_path or os.getenv("DATABASE_PATH", str(Path(__file__).with_name("securedev.db")))
     )
