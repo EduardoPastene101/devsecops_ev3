@@ -28,7 +28,20 @@ LOGIN_FAILURES = Counter(
     "securedev_login_failures_total",
     "Intentos de acceso fallidos",
 )
+class HideServerHeaderMiddleware:
+    def __init__(self, app):
+        self.app = app
 
+    def __call__(self, environ, start_response):
+        def custom_start_response(status, headers, exc_info=None):
+            headers = [
+                (name, value)
+                for name, value in headers
+                if name.lower() != "server"
+            ]
+            return start_response(status, headers, exc_info)
+
+        return self.app(environ, custom_start_response)
 
 def create_app(database_path=None):
     app = Flask(__name__)
@@ -205,6 +218,9 @@ def create_app(database_path=None):
     def metrics():
         return app.response_class(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
+
+    app.wsgi_app = HideServerHeaderMiddleware(app.wsgi_app)
+    
     return app
 
 
