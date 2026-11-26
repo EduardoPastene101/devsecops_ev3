@@ -59,6 +59,8 @@ def create_app(database_path=None):
     
     @app.after_request
     def add_security_headers(response):
+        response.headers.pop("Server", None)
+
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "object-src 'none'; "
