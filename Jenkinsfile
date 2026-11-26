@@ -31,10 +31,13 @@ pipeline {
 
         
 		
+
 		stage('3 - Tests') {
 			steps {
 				sh '''
 					docker rm -f securedev-ci 2>/dev/null || true
+
+					echo "Iniciando contenedor de pruebas..."
 
 					docker run -d \
 					  --name securedev-ci \
@@ -43,8 +46,12 @@ pipeline {
 
 					READY=0
 
+					echo "Esperando que Flask inicie..."
+
 					for i in $(seq 1 20); do
-						if curl -fsS http://127.0.0.1:18000/health; then
+						if docker exec securedev-ci python -c \
+						  "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read().decode())"
+						then
 							READY=1
 							break
 						fi
@@ -57,13 +64,17 @@ pipeline {
 						exit 1
 					fi
 
-					echo "Verificando endpoint /metrics"
-					curl -fsS http://127.0.0.1:18000/metrics \
-					  | grep -q "securedev_http_requests_total"
+					echo "Prueba de salud aprobada"
 
-					echo "Verificando pagina de login"
-					curl -fsS http://127.0.0.1:18000/login \
-					  -o /dev/null
+					echo "Verificando metricas Prometheus..."
+
+					docker exec securedev-ci python -c \
+					  "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/metrics'); data=r.read().decode(); assert 'securedev_http_requests_total' in data; print('Metricas disponibles correctamente')"
+
+					echo "Verificando pagina de login..."
+
+					docker exec securedev-ci python -c \
+					  "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/login'); assert r.status == 200; print('Login responde correctamente')"
 
 					echo "Todas las pruebas funcionales finalizaron correctamente"
 				'''
