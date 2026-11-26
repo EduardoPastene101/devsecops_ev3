@@ -8,7 +8,7 @@ pipeline {
         PROD_PATH = '/opt/securedev'
         ZAP_REPORTS = '/home/ubuntu/zap/reports'
         TEST_CONTAINER = 'securedev-ci'
-        TEST_PORT = '18000'
+        TEST_PORT = '8000'
     }
 
     stages {
